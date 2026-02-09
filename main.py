@@ -1,13 +1,14 @@
 import telebot
-import requests
+import instaloader
 import sqlite3
 import re
 from datetime import datetime
 
 API_TOKEN = 'YOUR_BOT_TOKEN_HERE'
 bot = telebot.TeleBot(API_TOKEN)
+L = instaloader.Instaloader()
 
-con = sqlite3.connect('tiktok_users.db', check_same_thread=False)
+con = sqlite3.connect('insta_users.db', check_same_thread=False)
 cur = con.cursor()
 cur.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, date TEXT)''')
 con.commit()
@@ -18,91 +19,61 @@ def save_user(user_id, username):
     con.commit()
 
 def extract_username(text):
-    match = re.search(r'tiktok\.com/@?([\w\.]+)', text)
+    match = re.search(r'instagram\.com/([A-Za-z0-9_.]+)', text)
     if match:
         return match.group(1)
-    if text.startswith('@'):
-        return text[1:]
-    return text
-
-def format_timestamp(ts):
-    if not ts:
-        return "N/A"
-    try:
-        return datetime.fromtimestamp(int(ts)).strftime('%Y-%m-%d %H:%M:%S')
-    except:
-        return "N/A"
-
-def get_tiktok_data(username):
-    url = "https://www.tikwm.com/api/user/info"
-    params = {"unique_id": username}
-    try:
-        response = requests.get(url, params=params)
-        data = response.json()
-        if data.get('code') == 0:
-            return data.get('data')
-        return None
-    except:
-        return None
+    return text.strip().replace('@', '')
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     save_user(message.from_user.id, message.from_user.username)
-    bot.reply_to(message, "Welcome. Send TikTok username or link.")
+    bot.reply_to(message, "Welcome to Legendary Insta Bot.\nSend Username or Link.\nDev: Mr. Velox (@C2_9H)")
 
 @bot.message_handler(func=lambda message: True)
-def analyze_user(message):
-    username = extract_username(message.text)
-    wait_msg = bot.reply_to(message, "Please wait...")
+def analyze_instagram(message):
+    target_username = extract_username(message.text)
+    wait_msg = bot.reply_to(message, "Analyzing Instagram Database... Please wait.")
     
-    data = get_tiktok_data(username)
-    
-    if not data:
-        bot.delete_message(message.chat.id, wait_msg.message_id)
-        bot.send_message(message.chat.id, "Error: User not found or invalid link.")
-        return
+    try:
+        profile = instaloader.Profile.from_username(L.context, target_username)
+        
+        is_private = "Yes 🔒" if profile.is_private else "No 🔓"
+        is_verified = "Yes ☑️" if profile.is_verified else "No"
+        is_business = "Yes 💼" if profile.is_business_account else "No"
+        
+        msg = f"""Instagram Analysis: @{profile.username}
 
-    user = data.get('user', {})
-    stats = data.get('stats', {})
-    
-    is_private = "Yes" if user.get('is_secret') else "No"
-    is_verified = "Yes" if user.get('verified') else "No"
-    can_see_following = "No" if user.get('is_secret') else "Yes"
-    open_favorite = "Yes" if user.get('openFavorite') else "No"
-    
-    msg = f"""Account Analysis: {user.get('uniqueId')}
-
-[ User Details ]
-Username: {user.get('uniqueId')}
-Nickname: {user.get('nickname')}
-User ID: {user.get('id')}
-Region: {user.get('region', 'N/A').upper()}
-Language: {user.get('language', 'N/A').upper()}
-Bio: {user.get('signature', 'None')}
+[ User Profile ]
+Name: {profile.full_name}
+Username: @{profile.username}
+ID: {profile.userid}
+Bio: {profile.biography}
 
 [ Statistics ]
-Followers: {stats.get('followerCount', 0)}
-Following: {stats.get('followingCount', 0)}
-Friends: {stats.get('friendCount', 0)}
-Likes: {stats.get('heartCount', 0)}
-Videos: {stats.get('videoCount', 0)}
+Followers: {profile.followers:,}
+Following: {profile.followees:,}
+Posts: {profile.mediacount:,}
 
-[ Status & Privacy ]
+[ Account Type ]
+Private: {is_private}
 Verified: {is_verified}
-Private Account: {is_private}
-Can See Following: {can_see_following}
-Open Favorites: {open_favorite}
+Business: {is_business}
+Category: {profile.business_category_name if profile.business_category_name else 'None'}
+External Link: {profile.external_url if profile.external_url else 'None'}
 
-[ History ]
-Created At: {format_timestamp(user.get('createTime'))}
-Last Nickname Change: {format_timestamp(user.get('last_change_nickname_time', 0))}
-Last Username Change: {format_timestamp(user.get('last_change_unique_id_time', 0))}
+[ Media ]
+HD Picture: {profile.profile_pic_url}
 
-[ Avatar ]
-{user.get('avatarLarger')}
+Dev: Mr. Velox (@C2_9H)
 """
-
-    bot.delete_message(message.chat.id, wait_msg.message_id)
-    bot.send_message(message.chat.id, msg)
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        bot.send_message(message.chat.id, msg)
+        
+    except instaloader.ProfileNotExistsException:
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        bot.send_message(message.chat.id, "Error: User not found.")
+    except Exception as e:
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        bot.send_message(message.chat.id, f"Error: {str(e)}")
 
 bot.infinity_polling()
